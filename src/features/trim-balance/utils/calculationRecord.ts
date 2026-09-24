@@ -1,4 +1,4 @@
-import { N1_SPEEDS, type EngineRun, type PersistedResultant, type PlotPointLabel, type TrimBalanceCalculation } from "../types/trimBalance";
+import { N1_SPEEDS, type EngineRun, type TrimBalanceCalculation } from "../types/trimBalance";
 
 export const storageKey = "cfm56-7b-trim-balance-calculations";
 
@@ -46,22 +46,6 @@ function isValidLimits(value: unknown): value is TrimBalanceCalculation["limits"
   return ["bearing", "ffccv"].every((key) => value[key] === undefined || (typeof value[key] === "number" && Number.isFinite(value[key]) && value[key] >= 0));
 }
 
-function isValidResultant(value: unknown, label: PlotPointLabel): value is PersistedResultant {
-  if (!isRecord(value) || value.label !== label || !isRecord(value.resultantPoint)) return false;
-  const point = value.resultantPoint;
-  return typeof point.x === "number" && Number.isFinite(point.x) && typeof point.y === "number" && Number.isFinite(point.y) &&
-    typeof value.resultantAmplitude === "number" && Number.isFinite(value.resultantAmplitude) && value.resultantAmplitude > 0 &&
-    typeof value.resultantAngleDeg === "number" && Number.isFinite(value.resultantAngleDeg) &&
-    typeof value.w6CmG === "number" && Number.isFinite(value.w6CmG) && value.w6CmG > 0 &&
-    typeof value.sensitivity === "number" && Number.isFinite(value.sensitivity) && value.sensitivity > 0;
-}
-
-function isValidResultants(value: unknown): value is TrimBalanceCalculation["selectedResultants"] {
-  if (value === undefined) return true;
-  if (!isRecord(value)) return false;
-  return Object.entries(value).every(([label, result]) => ["A", "B", "C", "D", "E", "F"].includes(label) && isValidResultant(result, label as PlotPointLabel));
-}
-
 function isValidCalculationRecord(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value) || !isRecord(value.information) || !isRecord(value.testScrewPositions)) return false;
   const information = value.information;
@@ -72,7 +56,6 @@ function isValidCalculationRecord(value: unknown): value is Record<string, unkno
     ["first", "second", "third"].every(validPosition) &&
     ["initialRun", "firstRun", "secondRun", "thirdRun", "finalRun"].every((key) => normalizeRun(value[key]) !== null) &&
     isValidLimits(value.limits) &&
-    isValidResultants(value.selectedResultants) &&
     (value.status === "Draft" || value.status === "In Progress" || value.status === "Completed") &&
     typeof value.updatedAt === "string" && Number.isFinite(Date.parse(value.updatedAt));
 }

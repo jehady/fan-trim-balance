@@ -1,7 +1,7 @@
 import { calculateBalanceWeight, calculateSensitivity } from "./balanceWeight";
 import { normalizeAngleDegrees, polarToCartesian, type Point } from "./geometry";
 import { calculatePairwiseAnalysis, type BalancePoint, type PairwiseAnalysis } from "./pairwiseAnalysis";
-import type { PersistedResultant, PlotPointData, PlotPointLabel } from "../types/trimBalance";
+import type { PlotPointData, PlotPointLabel } from "../types/trimBalance";
 
 export type SelectedResultants = Partial<Record<PlotPointLabel, Point>>;
 
@@ -11,15 +11,6 @@ export interface SelectedResultMetrics {
   resultantAngleDeg: number;
   w6CmG: number;
   sensitivity: number;
-}
-
-export function toPersistedResultant(label: PlotPointLabel, metrics: SelectedResultMetrics): PersistedResultant {
-  return { label, resultantPoint: { ...metrics.resultantPoint }, resultantAmplitude: metrics.resultantAmplitude, resultantAngleDeg: metrics.resultantAngleDeg, w6CmG: metrics.w6CmG, sensitivity: metrics.sensitivity };
-}
-
-export function selectedResultantsFromPersisted(resultants: Partial<Record<PlotPointLabel, PersistedResultant>> | undefined): SelectedResultants {
-  if (!resultants) return {};
-  return Object.fromEntries(Object.entries(resultants).map(([label, result]) => [label, result?.resultantPoint])) as SelectedResultants;
 }
 
 export function storeSelectedResultant(
