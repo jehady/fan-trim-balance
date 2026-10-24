@@ -45,12 +45,20 @@ export function validateEngineRun(
 }
 
 export function validateThreeShotInput(
-  input: ThreeShotInput
+  input: ThreeShotInput & { testScrewPositions?: { first: number; second: number; third: number } }
 ): string[] {
-  return [
+  const errors = [
     ...validateEngineRun(input.initialRun, "Initial run"),
     ...validateEngineRun(input.firstRun, "First run"),
     ...validateEngineRun(input.secondRun, "Second run"),
     ...validateEngineRun(input.thirdRun, "Third run"),
   ];
+  if (input.testScrewPositions) {
+    for (const [run, position] of Object.entries(input.testScrewPositions)) {
+      if (!Number.isInteger(position) || position < 1 || position > 36) {
+        errors.push(`${run} test screw position must be an integer from 1 through 36.`);
+      }
+    }
+  }
+  return errors;
 }

@@ -1,8 +1,10 @@
 import {
   calculateThreeShotGeometry,
+  hasCommonArea,
   intersectCircles,
   distance,
   screwPositionToPlotAngle,
+  validateResultantSelection,
   type Circle,
 } from "./geometry";
 import {
@@ -44,6 +46,62 @@ describe("circle intersection", () => {
 
     expect(distance(second, circle2.center))
       .toBeCloseTo(5);
+  });
+});
+
+describe("manual resultant selection validation", () => {
+  const overlapping = [
+    { center: { x: 0, y: 0 }, radius: 5 },
+    { center: { x: 10, y: 0 }, radius: 5 },
+    { center: { x: 5, y: 0 }, radius: 5 },
+  ];
+
+  it("accepts a shared boundary point of the three circles", () => {
+    expect(validateResultantSelection(overlapping, { x: 5, y: 0 }).valid).toBe(true);
+  });
+
+  it("accepts a point in the interior of the common area", () => {
+    const circles = [
+      { center: { x: 0, y: 0 }, radius: 5 },
+      { center: { x: 1, y: 0 }, radius: 5 },
+      { center: { x: 0, y: 1 }, radius: 5 },
+    ];
+    expect(validateResultantSelection(circles, { x: 1, y: 1 }).valid).toBe(true);
+  });
+
+  it("rejects a point outside the three-circle common area", () => {
+    expect(validateResultantSelection(overlapping, { x: 20, y: 20 })).toMatchObject({
+      valid: false,
+      reason: "Select the resultant within the common overlap of all three run circles.",
+    });
+  });
+
+  it("reports when the circles have no common area", () => {
+    const inconsistent = [
+      { center: { x: 0, y: 0 }, radius: 1 },
+      { center: { x: 10, y: 0 }, radius: 1 },
+      { center: { x: 0, y: 10 }, radius: 1 },
+    ];
+    expect(hasCommonArea(inconsistent)).toBe(false);
+    expect(validateResultantSelection(inconsistent, { x: 0, y: 0 }).reason).toContain("Cannot determine");
+  });
+
+  it("does not let the pointer allowance manufacture a common area for separated circles", () => {
+    const separated = [
+      { center: { x: 0, y: 0 }, radius: 5 },
+      { center: { x: 10.0001, y: 0 }, radius: 5 },
+      { center: { x: 5, y: 0 }, radius: 5 },
+    ];
+    expect(validateResultantSelection(separated, { x: 5, y: 0 }).reason).toContain("Cannot determine");
+  });
+
+  it("rejects a zero resultant even when it lies in the common area", () => {
+    const circles = [
+      { center: { x: 0, y: 0 }, radius: 2 },
+      { center: { x: 0, y: 0 }, radius: 2 },
+      { center: { x: 0, y: 0 }, radius: 2 },
+    ];
+    expect(validateResultantSelection(circles, { x: 0, y: 0 }).reason).toContain("zero or too close to zero");
   });
 });
 

@@ -21,7 +21,10 @@ export interface ThreeShotInput {
 
 export interface CalculationInformation {
   id: string;
+  aircraftType: string;
   aircraftRegistration: string;
+  aircraftEffectivity: string;
+  initialScrewConfiguration: string;
   engineSerialNumber: string;
   engineModel: string;
   date: string;
@@ -41,10 +44,24 @@ export interface VibrationLimit {
   ffccv?: number;
 }
 
+export interface SourceProvenance {
+  documentTitle: string;
+  revisionOrDate: string;
+  effectivity: string;
+  sectionOrFigure: string;
+  verificationStatus: "unverified" | "verified" | "not-applicable";
+}
+
+export interface LimitSourceProvenance extends SourceProvenance {
+  verificationStatus: "unverified" | "verified";
+}
+
 export interface TrimBalanceCalculation extends ThreeShotInput {
   information: CalculationInformation;
   finalRun: EngineRun;
   limits: VibrationLimit;
+  limitSources?: Partial<Record<"bearing" | "ffccv", LimitSourceProvenance>>;
+  selectedResultants?: Partial<Record<PlotPointLabel, { x: number; y: number }>>;
   testScrewPositions: {
     first: number;
     second: number;

@@ -1,9 +1,24 @@
 import { calculateBalanceWeight, calculateSensitivity } from "./balanceWeight";
-import { normalizeAngleDegrees, polarToCartesian, type Point } from "./geometry";
+import { normalizeAngleDegrees, polarToCartesian, validateResultantSelection, type Point, type ThreeShotCircles } from "./geometry";
 import { calculatePairwiseAnalysis, type BalancePoint, type PairwiseAnalysis } from "./pairwiseAnalysis";
 import type { PlotPointData, PlotPointLabel } from "../types/trimBalance";
 
 export type SelectedResultants = Partial<Record<PlotPointLabel, Point>>;
+
+export function validateAllSelectedResultants(
+  points: PlotPointData[],
+  selections: SelectedResultants,
+  circlesByLabel: Partial<Record<PlotPointLabel, ThreeShotCircles>>
+): boolean {
+  return points.length === 6 && points.every((point) => {
+    const selected = selections[point.label];
+    const circles = circlesByLabel[point.label];
+    return Boolean(selected && circles && validateResultantSelection(
+      [circles.firstCircle, circles.secondCircle, circles.thirdCircle],
+      selected
+    ).valid);
+  });
+}
 
 export interface SelectedResultMetrics {
   resultantPoint: Point;

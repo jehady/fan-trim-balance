@@ -1,6 +1,7 @@
-import { N1_SPEEDS, type EngineRun, type N1Speed } from "../types/trimBalance";
+import { N1_SPEEDS, type EngineRun, type LimitSourceProvenance, type N1Speed } from "../types/trimBalance";
 
 export type FinalRunStatus = "PASS" | "FAIL" | "NOT EVALUATED";
+export type ConfiguredThresholdResult = "WITHIN CONFIGURED THRESHOLDS" | "EXCEEDS CONFIGURED THRESHOLDS" | "INCOMPLETE";
 export type FinalRunSensor = "bearing" | "ffccv";
 
 export interface FinalRunRow {
@@ -18,6 +19,8 @@ export interface FinalRunEvaluation {
   status: FinalRunStatus;
   missingMeasurements: string[];
   exceededLimits: string[];
+  configuredThresholdResult: ConfiguredThresholdResult;
+  evaluationBlockers: string[];
 }
 
 function valueFor(run: EngineRun, speed: N1Speed, sensor: FinalRunSensor): number {
@@ -42,13 +45,15 @@ export function buildFinalRunRows(initialRun: EngineRun, finalRun: EngineRun): F
 export function evaluateFinalRun(
   initialRun: EngineRun,
   finalRun: EngineRun,
-  limits: { bearing?: number; ffccv?: number }
+  limits: { bearing?: number; ffccv?: number },
+  limitSources: Partial<Record<"bearing" | "ffccv", LimitSourceProvenance>> = {}
 ): FinalRunEvaluation {
   const rows = buildFinalRunRows(initialRun, finalRun);
   const missingMeasurements: string[] = [];
   const exceededLimits: string[] = [];
   const hasBearingLimit = Number.isFinite(limits.bearing);
   const hasFfccvLimit = Number.isFinite(limits.ffccv);
+  const evaluationBlockers: string[] = [];
 
   for (const row of rows) {
     const target = row.n1Speed === "TO" ? "TO" : `${row.n1Speed}%`;
@@ -60,6 +65,26 @@ export function evaluateFinalRun(
     if (hasFfccvLimit && Number.isFinite(row.finalFfccv) && row.finalFfccv > limits.ffccv!) exceededLimits.push(`${target} final FFCCV`);
   }
 
-  const status = missingMeasurements.length || !hasBearingLimit || !hasFfccvLimit ? "NOT EVALUATED" : exceededLimits.length ? "FAIL" : "PASS";
-  return { rows, status, missingMeasurements, exceededLimits };
+  if (!hasBearingLimit) evaluationBlockers.push("N°1 Bearing threshold is not configured.");
+  if (!hasFfccvLimit) evaluationBlockers.push("FFCCV threshold is not configured.");
+  for (const sensor of ["bearing", "ffccv"] as const) {
+    const source = limitSources[sensor];
+    const hasCompleteVerifiedSource = source?.verificationStatus === "verified" &&
+      [source.documentTitle, source.revisionOrDate, source.effectivity, source.sectionOrFigure]
+        .every((field) => field.trim().length > 0);
+    if ((sensor === "bearing" ? hasBearingLimit : hasFfccvLimit) && !hasCompleteVerifiedSource) {
+      evaluationBlockers.push(`${sensor === "bearing" ? "N°1 Bearing" : "FFCCV"} limit source applicability and comparison semantics are unverified.`);
+    }
+  }
+  if (missingMeasurements.length) evaluationBlockers.push("Required initial or final measurements are missing.");
+
+  const hasAllMeasurements = missingMeasurements.length === 0;
+  const hasAllLimits = hasBearingLimit && hasFfccvLimit;
+  const configuredThresholdResult: ConfiguredThresholdResult = !hasAllMeasurements || !hasAllLimits
+    ? "INCOMPLETE"
+    : exceededLimits.length ? "EXCEEDS CONFIGURED THRESHOLDS" : "WITHIN CONFIGURED THRESHOLDS";
+  const status: FinalRunStatus = evaluationBlockers.length
+    ? "NOT EVALUATED"
+    : exceededLimits.length ? "FAIL" : "PASS";
+  return { rows, status, missingMeasurements, exceededLimits, configuredThresholdResult, evaluationBlockers };
 }

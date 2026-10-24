@@ -28,16 +28,25 @@ describe("final run evaluation", () => {
     expect(result.missingMeasurements).toContain("TO final N°1 Bearing");
   });
 
-  it("returns PASS when final values are below configured limits", () => {
-    expect(evaluateFinalRun(initialRun, finalRun(2.3, 2), { bearing: 3, ffccv: 3 }).status).toBe("PASS");
+  it("does not claim PASS when configured thresholds have unverified sources", () => {
+    const result = evaluateFinalRun(initialRun, finalRun(2.3, 2), { bearing: 3, ffccv: 3 });
+    expect(result.status).toBe("NOT EVALUATED");
+    expect(result.configuredThresholdResult).toBe("WITHIN CONFIGURED THRESHOLDS");
+    expect(result.evaluationBlockers.join(" ")).toContain("unverified");
   });
 
-  it("returns PASS when final values equal configured limits", () => {
-    expect(evaluateFinalRun(initialRun, finalRun(3, 3), { bearing: 3, ffccv: 3 }).status).toBe("PASS");
+  it("does not flag equality in software threshold screening but makes no compliance claim", () => {
+    const result = evaluateFinalRun(initialRun, finalRun(3, 3), { bearing: 3, ffccv: 3 });
+    expect(result.status).toBe("NOT EVALUATED");
+    expect(result.exceededLimits).toEqual([]);
+    expect(result.configuredThresholdResult).toBe("WITHIN CONFIGURED THRESHOLDS");
   });
 
-  it("returns FAIL when a final value exceeds its configured limit", () => {
-    expect(evaluateFinalRun(initialRun, finalRun(3.1, 2), { bearing: 3, ffccv: 3 }).status).toBe("FAIL");
+  it("reports values above thresholds without claiming an unverified maintenance failure", () => {
+    const result = evaluateFinalRun(initialRun, finalRun(3.1, 2), { bearing: 3, ffccv: 3 });
+    expect(result.status).toBe("NOT EVALUATED");
+    expect(result.exceededLimits).toContain("TO final N°1 Bearing");
+    expect(result.configuredThresholdResult).toBe("EXCEEDS CONFIGURED THRESHOLDS");
   });
 
   it("calculates delta as final minus initial", () => {
@@ -45,9 +54,10 @@ describe("final run evaluation", () => {
     expect(row.deltaBearing).toBeCloseTo(-4.2);
   });
 
-  it("uses final vibration, not delta, for pass/fail", () => {
+  it("uses final vibration, not delta, for configured-threshold screening", () => {
     const result = evaluateFinalRun(initialRun, finalRun(2.3, 2), { bearing: 3, ffccv: 3 });
     expect(result.rows[0].deltaBearing).toBeLessThan(0);
-    expect(result.status).toBe("PASS");
+    expect(result.configuredThresholdResult).toBe("WITHIN CONFIGURED THRESHOLDS");
+    expect(result.status).toBe("NOT EVALUATED");
   });
 });

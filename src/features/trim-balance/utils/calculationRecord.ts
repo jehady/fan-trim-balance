@@ -1,4 +1,4 @@
-import { N1_SPEEDS, type EngineRun, type TrimBalanceCalculation } from "../types/trimBalance";
+import { N1_SPEEDS, type CalculationInformation, type EngineRun, type TrimBalanceCalculation } from "../types/trimBalance";
 
 export const storageKey = "cfm56-7b-trim-balance-calculations";
 
@@ -9,13 +9,15 @@ export const blankRun = (): EngineRun => ({
 export function createCalculation(): TrimBalanceCalculation {
   const now = new Date();
   return {
-    information: { id: `TB-${now.toISOString().slice(0, 10).replaceAll("-", "")}`, aircraftRegistration: "", engineSerialNumber: "", engineModel: "CFM56-7B", date: now.toISOString().slice(0, 10), technician: "", notes: "" },
+    information: { id: `TB-${now.toISOString().slice(0, 10).replaceAll("-", "")}`, aircraftType: "", aircraftRegistration: "", aircraftEffectivity: "", initialScrewConfiguration: "", engineSerialNumber: "", engineModel: "CFM56-7B", date: now.toISOString().slice(0, 10), technician: "", notes: "" },
     initialRun: blankRun(),
     firstRun: blankRun(),
     secondRun: blankRun(),
     thirdRun: blankRun(),
     finalRun: blankRun(),
     limits: {},
+    limitSources: {},
+    selectedResultants: {},
     testScrewPositions: { first: 35, second: 23, third: 11 },
     status: "Draft",
     updatedAt: now.toISOString(),
@@ -46,6 +48,32 @@ function isValidLimits(value: unknown): value is TrimBalanceCalculation["limits"
   return ["bearing", "ffccv"].every((key) => value[key] === undefined || (typeof value[key] === "number" && Number.isFinite(value[key]) && value[key] >= 0));
 }
 
+const plotPointLabels = ["A", "B", "C", "D", "E", "F"] as const;
+
+function isValidSelectedResultants(value: unknown): value is NonNullable<TrimBalanceCalculation["selectedResultants"]> {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return Object.entries(value).every(([label, point]) =>
+    plotPointLabels.includes(label as typeof plotPointLabels[number]) &&
+    isRecord(point) &&
+    typeof point.x === "number" && Number.isFinite(point.x) &&
+    typeof point.y === "number" && Number.isFinite(point.y)
+  );
+}
+
+function isValidLimitSources(value: unknown): value is NonNullable<TrimBalanceCalculation["limitSources"]> {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return ["bearing", "ffccv"].every((sensor) => {
+    const source = value[sensor];
+    if (source === undefined) return true;
+    if (!isRecord(source)) return false;
+    return ["documentTitle", "revisionOrDate", "effectivity", "sectionOrFigure"]
+      .every((key) => typeof source[key] === "string") &&
+      source.verificationStatus === "unverified";
+  });
+}
+
 function isValidCalculationRecord(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value) || !isRecord(value.information) || !isRecord(value.testScrewPositions)) return false;
   const information = value.information;
@@ -53,9 +81,14 @@ function isValidCalculationRecord(value: unknown): value is Record<string, unkno
   const fields = ["id", "aircraftRegistration", "engineSerialNumber", "engineModel", "date", "technician", "notes"];
   const validPosition = (key: string) => typeof positions[key] === "number" && Number.isInteger(positions[key]) && positions[key] >= 1 && positions[key] <= 36;
   return fields.every((field) => typeof information[field] === "string") &&
+    (information.aircraftType === undefined || typeof information.aircraftType === "string") &&
+    (information.aircraftEffectivity === undefined || typeof information.aircraftEffectivity === "string") &&
+    (information.initialScrewConfiguration === undefined || typeof information.initialScrewConfiguration === "string") &&
     ["first", "second", "third"].every(validPosition) &&
     ["initialRun", "firstRun", "secondRun", "thirdRun", "finalRun"].every((key) => normalizeRun(value[key]) !== null) &&
     isValidLimits(value.limits) &&
+    isValidLimitSources(value.limitSources) &&
+    isValidSelectedResultants(value.selectedResultants) &&
     (value.status === "Draft" || value.status === "In Progress" || value.status === "Completed") &&
     typeof value.updatedAt === "string" && Number.isFinite(Date.parse(value.updatedAt));
 }
@@ -68,5 +101,21 @@ export function restoreCalculation(item: unknown): TrimBalanceCalculation | null
   const thirdRun = normalizeRun(item.thirdRun);
   const finalRun = normalizeRun(item.finalRun);
   if (!initialRun || !firstRun || !secondRun || !thirdRun || !finalRun) return null;
-  return { ...item, initialRun, firstRun, secondRun, thirdRun, finalRun } as TrimBalanceCalculation;
+  const information = item.information as CalculationInformation;
+  return {
+    ...item,
+    information: {
+      ...information,
+      aircraftType: information.aircraftType ?? "",
+      aircraftEffectivity: information.aircraftEffectivity ?? "",
+      initialScrewConfiguration: information.initialScrewConfiguration ?? "",
+    },
+    limitSources: item.limitSources ?? {},
+    selectedResultants: item.selectedResultants ?? {},
+    initialRun,
+    firstRun,
+    secondRun,
+    thirdRun,
+    finalRun,
+  } as TrimBalanceCalculation;
 }

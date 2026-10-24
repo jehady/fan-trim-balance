@@ -35,6 +35,96 @@ export interface ThreeShotGeometryResult {
 import { calculateBalanceWeight, calculateSensitivity } from "./balanceWeight";
 export { THREE_SHOT_TEST_WEIGHT_MOMENT_CM_G } from "./balanceWeight";
 
+export type ThreeShotCircles = Pick<
+  ThreeShotGeometryResult,
+  "initialCircle" | "firstCircle" | "secondCircle" | "thirdCircle"
+>;
+
+export interface ResultantSelectionValidation {
+  valid: boolean;
+  reason?: string;
+  tolerance: number;
+}
+
+export function resultantSelectionTolerance(circles: Circle[]): number {
+  const scale = Math.max(0, ...circles.map(({ radius, center }) =>
+    Math.hypot(center.x, center.y) + radius
+  )) * 1.15;
+  const numericalTolerance = Math.max(Number.EPSILON * Math.max(1, scale) * 32, scale * 1e-9);
+  return Math.max(numericalTolerance, scale / (440 / 2 - 28));
+}
+
+function geometryTolerance(circles: Circle[]): number {
+  const scale = Math.max(0, ...circles.map(({ radius, center }) =>
+    Math.hypot(center.x, center.y) + radius
+  ));
+  return Math.max(Number.EPSILON * Math.max(1, scale) * 32, scale * 1e-9);
+}
+
+function areValidCircles(circles: Circle[]): boolean {
+  return circles.length === 3 && circles.every(({ center, radius }) =>
+    Number.isFinite(center.x) && Number.isFinite(center.y) &&
+    Number.isFinite(radius) && radius >= 0
+  );
+}
+
+function pointIsInCommonArea(point: Point, circles: Circle[], tolerance: number): boolean {
+  return circles.every((circle) => distance(point, circle.center) <= circle.radius + tolerance);
+}
+
+export function hasCommonArea(circles: Circle[], tolerance = geometryTolerance(circles)): boolean {
+  if (!areValidCircles(circles) || !Number.isFinite(tolerance) || tolerance < 0) return false;
+
+  const candidates: Point[] = circles.map(({ center }) => center);
+  for (let first = 0; first < circles.length; first += 1) {
+    for (let second = first + 1; second < circles.length; second += 1) {
+      candidates.push(...intersectCircles(circles[first], circles[second]).intersections);
+    }
+  }
+  return candidates.some((candidate) => pointIsInCommonArea(candidate, circles, tolerance));
+}
+
+export function validateResultantSelection(
+  circles: Circle[],
+  point: Point,
+  tolerance = resultantSelectionTolerance(circles)
+): ResultantSelectionValidation {
+  if (!areValidCircles(circles)) {
+    return { valid: false, reason: "Plot geometry is invalid; review the run inputs and screw positions.", tolerance };
+  }
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+    return { valid: false, reason: "The selected point is not finite.", tolerance };
+  }
+  const numericTolerance = geometryTolerance(circles);
+  if (!hasCommonArea(circles, numericTolerance)) {
+    return { valid: false, reason: "Cannot determine a common area for the three run circles; review inputs and the plot.", tolerance };
+  }
+  if (Math.hypot(point.x, point.y) <= numericTolerance) {
+    return { valid: false, reason: "The selected resultant is zero or too close to zero to calculate a correction.", tolerance };
+  }
+  if (!pointIsInCommonArea(point, circles, tolerance)) {
+    return { valid: false, reason: "Select the resultant within the common overlap of all three run circles.", tolerance };
+  }
+  return { valid: true, tolerance };
+}
+
+export function buildThreeShotCircles(input: ThreeShotGeometryInput): ThreeShotCircles {
+  const initialCircle: Circle = {
+    center: { x: 0, y: 0 },
+    radius: input.initialVibration,
+  };
+  const buildRunCircle = (vibration: number, position: number): Circle => ({
+    center: polarToCartesian(input.initialVibration, screwPositionToPlotAngle(position)),
+    radius: vibration,
+  });
+  return {
+    initialCircle,
+    firstCircle: buildRunCircle(input.firstRunVibration, input.firstTestScrewPosition),
+    secondCircle: buildRunCircle(input.secondRunVibration, input.secondTestScrewPosition),
+    thirdCircle: buildRunCircle(input.thirdRunVibration, input.thirdTestScrewPosition),
+  };
+}
+
 /**
  * Converts a rear-spinner-cone screw position to the polar-plot convention.
  *
@@ -299,31 +389,7 @@ function circleResidualSum(circles: Circle[], point: Point): number {
 export function calculateThreeShotGeometry(
   input: ThreeShotGeometryInput
 ): ThreeShotGeometryResult {
-  const initialCircle: Circle = {
-    center: { x: 0, y: 0 },
-    radius: input.initialVibration,
-  };
-
-  const buildRunCircle = (vibration: number, position: number): Circle => ({
-    center: polarToCartesian(
-      input.initialVibration,
-      screwPositionToPlotAngle(position)
-    ),
-    radius: vibration,
-  });
-
-  const firstCircle = buildRunCircle(
-    input.firstRunVibration,
-    input.firstTestScrewPosition
-  );
-  const secondCircle = buildRunCircle(
-    input.secondRunVibration,
-    input.secondTestScrewPosition
-  );
-  const thirdCircle = buildRunCircle(
-    input.thirdRunVibration,
-    input.thirdTestScrewPosition
-  );
+  const { initialCircle, firstCircle, secondCircle, thirdCircle } = buildThreeShotCircles(input);
 
   const resultantPoint = findBestFitCommonIntersection([
     firstCircle,

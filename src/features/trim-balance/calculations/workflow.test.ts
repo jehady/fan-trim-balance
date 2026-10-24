@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { calculateBalanceWeight, calculateSensitivity } from "./balanceWeight";
 import { buildPlotPoints } from "./buildPlotPoints";
 import { calculatePairwiseAnalysis } from "./pairwiseAnalysis";
-import { calculateSelectedPairwiseAnalysis, calculateSelectedResultMetrics, storeSelectedResultant, type SelectedResultants } from "./selectedResultants";
+import { calculateSelectedPairwiseAnalysis, calculateSelectedResultMetrics, storeSelectedResultant, validateAllSelectedResultants, type SelectedResultants } from "./selectedResultants";
+import type { ThreeShotCircles } from "./geometry";
 import { calculateFinalCorrection, calculateFinalCorrectionFromPairwise, selectMaximumUPair } from "./finalCorrection";
 import { selectInitialPlotPoints } from "./selectPlotPoints";
 import { validateEngineRun } from "../utils/validation";
@@ -19,6 +20,38 @@ const initial: EngineRun = { measurements: [
 const laterRun: EngineRun = { measurements: initial.measurements.map((item) => ({ ...item, bearingVibration: item.bearingVibration + 1, ffccvVibration: item.ffccvVibration + 1 })) };
 
 describe("workflow calculation primitives", () => {
+  it.each([0, 1, 2, 3, 4, 5])("does not authorize final correction with %i confirmed resultants", (count) => {
+    const points = buildPlotPoints(initial, laterRun, laterRun, laterRun);
+    const circles: ThreeShotCircles = {
+      initialCircle: { center: { x: 0, y: 0 }, radius: 5 },
+      firstCircle: { center: { x: 0, y: 0 }, radius: 5 },
+      secondCircle: { center: { x: 1, y: 0 }, radius: 5 },
+      thirdCircle: { center: { x: 0, y: 1 }, radius: 5 },
+    };
+    const circlesByLabel = Object.fromEntries(points.map((point) => [point.label, circles]));
+    const selections = points.slice(0, count).reduce(
+      (current, point) => storeSelectedResultant(current, point.label, { x: 1, y: 1 }),
+      {} as SelectedResultants
+    );
+    expect(validateAllSelectedResultants(points, selections, circlesByLabel)).toBe(false);
+  });
+
+  it("authorizes complete correction only when all six resultants are valid", () => {
+    const points = buildPlotPoints(initial, laterRun, laterRun, laterRun);
+    const circles: ThreeShotCircles = {
+      initialCircle: { center: { x: 0, y: 0 }, radius: 5 },
+      firstCircle: { center: { x: 0, y: 0 }, radius: 5 },
+      secondCircle: { center: { x: 1, y: 0 }, radius: 5 },
+      thirdCircle: { center: { x: 0, y: 1 }, radius: 5 },
+    };
+    const circlesByLabel = Object.fromEntries(points.map((point) => [point.label, circles]));
+    const selections = points.reduce(
+      (current, point) => storeSelectedResultant(current, point.label, { x: 1, y: 1 }),
+      {} as SelectedResultants
+    );
+    expect(validateAllSelectedResultants(points, selections, circlesByLabel)).toBe(true);
+  });
+
   it("reports missing and invalid N1 measurements", () => {
     expect(validateEngineRun({ measurements: [{ n1Speed: "TO", bearingVibration: -1, ffccvVibration: Number.NaN }] }, "Initial")).toHaveLength(7);
   });
