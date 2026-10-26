@@ -10,13 +10,24 @@ export function validateAllSelectedResultants(
   selections: SelectedResultants,
   circlesByLabel: Partial<Record<PlotPointLabel, ThreeShotCircles>>
 ): boolean {
-  return points.length === 6 && points.every((point) => {
+  if (points.length !== 6) {
+    return false;
+  }
+
+  return points.every((point) => {
     const selected = selections[point.label];
     const circles = circlesByLabel[point.label];
-    return Boolean(selected && circles && validateResultantSelection(
+    if (!selected || !circles) {
+      return false;
+    }
+    const validation = validateResultantSelection(
       [circles.firstCircle, circles.secondCircle, circles.thirdCircle],
       selected
-    ).valid);
+    );
+    if (!validation.valid) {
+      return false;
+    }
+    return Number.isFinite(selected.x) && Number.isFinite(selected.y);
   });
 }
 

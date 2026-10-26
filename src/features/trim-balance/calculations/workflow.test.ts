@@ -53,7 +53,7 @@ describe("workflow calculation primitives", () => {
   });
 
   it("reports missing and invalid N1 measurements", () => {
-    expect(validateEngineRun({ measurements: [{ n1Speed: "TO", bearingVibration: -1, ffccvVibration: Number.NaN }] }, "Initial")).toHaveLength(7);
+    expect(validateEngineRun({ measurements: [{ n1Speed: "TO", bearingVibration: -1, ffccvVibration: Number.NaN }] }, "Initial")).toHaveLength(8);
   });
 
   it("selects the top three initial amplitudes for each sensor", () => {

@@ -40,6 +40,15 @@ describe("calculation record persistence", () => {
     expect(restored?.selectedResultants).toEqual(stored.selectedResultants);
   });
 
+  it("rejects non-finite persisted resultant data instead of accepting partial values", () => {
+    const stored = persistedCalculation() as Record<string, unknown>;
+    stored.selectedResultants = { A: { x: Number.NaN, y: 1 } };
+    expect(restoreCalculation(stored)).toBeNull();
+
+    stored.selectedResultants = { B: { x: Infinity, y: 1 } };
+    expect(restoreCalculation(stored)).toBeNull();
+  });
+
   it("loads legacy records without resultants or the newer configuration fields", () => {
     const stored = persistedCalculation() as Record<string, unknown>;
     delete stored.selectedResultants;

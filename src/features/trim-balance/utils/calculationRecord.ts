@@ -43,6 +43,10 @@ function normalizeRun(value: unknown): EngineRun | null {
   return measurements.every((measurement) => measurement !== null) ? { measurements } as EngineRun : null;
 }
 
+function isValidStatus(value: unknown): value is TrimBalanceCalculation["status"] {
+  return typeof value === "string" && ["Draft", "In Progress", "Correction Calculated", "Final Run Completed", "Completed"].includes(value);
+}
+
 function isValidLimits(value: unknown): value is TrimBalanceCalculation["limits"] {
   if (!isRecord(value)) return false;
   return ["bearing", "ffccv"].every((key) => value[key] === undefined || (typeof value[key] === "number" && Number.isFinite(value[key]) && value[key] >= 0));
@@ -57,7 +61,8 @@ function isValidSelectedResultants(value: unknown): value is NonNullable<TrimBal
     plotPointLabels.includes(label as typeof plotPointLabels[number]) &&
     isRecord(point) &&
     typeof point.x === "number" && Number.isFinite(point.x) &&
-    typeof point.y === "number" && Number.isFinite(point.y)
+    typeof point.y === "number" && Number.isFinite(point.y) &&
+    !(Number.isNaN(point.x) || Number.isNaN(point.y) || point.x === Infinity || point.y === Infinity || point.x === -Infinity || point.y === -Infinity)
   );
 }
 
@@ -89,7 +94,7 @@ function isValidCalculationRecord(value: unknown): value is Record<string, unkno
     isValidLimits(value.limits) &&
     isValidLimitSources(value.limitSources) &&
     isValidSelectedResultants(value.selectedResultants) &&
-    (value.status === "Draft" || value.status === "In Progress" || value.status === "Completed") &&
+    isValidStatus(value.status) &&
     typeof value.updatedAt === "string" && Number.isFinite(Date.parse(value.updatedAt));
 }
 

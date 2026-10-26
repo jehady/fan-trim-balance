@@ -103,6 +103,35 @@ describe("manual resultant selection validation", () => {
     ];
     expect(validateResultantSelection(circles, { x: 0, y: 0 }).reason).toContain("zero or too close to zero");
   });
+
+  it("rejects a point outside the allowed common region with a clear validation reason", () => {
+    const circles = [
+      { center: { x: 0, y: 0 }, radius: 5 },
+      { center: { x: 9, y: 0 }, radius: 5 },
+      { center: { x: 4, y: 9 }, radius: 5 },
+    ];
+    expect(validateResultantSelection(circles, { x: 4, y: 20 }).valid).toBe(false);
+    expect(validateResultantSelection(circles, { x: 4, y: 20 }).reason).toContain("common area");
+  });
+
+  it("handles degenerate or missing common overlap without manufacturing a valid resultant", () => {
+    const circles = [
+      { center: { x: 0, y: 0 }, radius: 1 },
+      { center: { x: 10, y: 0 }, radius: 1 },
+      { center: { x: 20, y: 0 }, radius: 1 },
+    ];
+    expect(hasCommonArea(circles)).toBe(false);
+    expect(validateResultantSelection(circles, { x: 5, y: 0 }).reason).toContain("Cannot determine");
+    expect(() => calculateThreeShotGeometry({
+      initialVibration: 4,
+      firstRunVibration: 2,
+      secondRunVibration: 2,
+      thirdRunVibration: 2,
+      firstTestScrewPosition: 35,
+      secondTestScrewPosition: 23,
+      thirdTestScrewPosition: 11,
+    })).toThrow(/no valid common overlap/i);
+  });
 });
 
 describe("3-shot geometry", () => {

@@ -17,7 +17,8 @@ import { Correction } from "./features/trim-balance/components/Correction";
 import { FinalCorrectionPanel } from "./features/trim-balance/components/FinalCorrectionPanel";
 import { Report } from "./features/trim-balance/components/Report";
 import { validateThreeShotInput } from "./features/trim-balance/utils/validation";
-import { createCalculation, restoreCalculation, storageKey } from "./features/trim-balance/utils/calculationRecord";
+import { createCalculation } from "./features/trim-balance/utils/calculationRecord";
+import { loadSavedCalculations, persistSavedCalculations } from "./features/trim-balance/utils/storage";
 import type { N1Speed, PlotPointLabel, TrimBalanceCalculation } from "./features/trim-balance/types/trimBalance";
 
 const steps = ["Information", "Initial run", "First run", "Second run", "Third run", "Point selection", "3-shot plot", "Final correction", "Final run", "Report"];
@@ -26,26 +27,6 @@ type ResultantMetrics = Exclude<ReturnType<typeof calculateSelectedResultMetrics
 type UpdateCalculation = (change: (item: TrimBalanceCalculation) => TrimBalanceCalculation) => void;
 type RunName = "initialRun" | "firstRun" | "secondRun" | "thirdRun" | "finalRun";
 const emptyResultants: SelectedResultants = {};
-
-function loadSavedCalculations(): { calculations: TrimBalanceCalculation[]; warning?: string } {
-  try {
-    const raw = localStorage.getItem(storageKey);
-    const stored: unknown = JSON.parse(raw ?? "[]");
-    if (!Array.isArray(stored)) {
-      return { calculations: [], warning: "Saved browser data is not a calculation list; it was left unchanged and not loaded." };
-    }
-    const restored = stored.map(restoreCalculation);
-    const calculations = restored.filter((item): item is TrimBalanceCalculation => item !== null);
-    const rejectedCount = restored.length - calculations.length;
-    return {
-      calculations,
-      warning: rejectedCount ? `${rejectedCount} malformed or unsupported saved calculation(s) were rejected; the stored data was left unchanged until you explicitly save.` : undefined,
-    };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown storage error";
-    return { calculations: [], warning: `Saved browser data could not be read: ${detail}. It was not overwritten.` };
-  }
-}
 
 function App() {
   const [savedState, setSavedState] = useState(loadSavedCalculations);
@@ -77,15 +58,17 @@ function App() {
   const updateMeasurement = (run: RunName, speed: N1Speed, field: "bearingVibration" | "ffccvVibration", value: number) => update((item) => ({ ...item, selectedResultants: run === "finalRun" ? item.selectedResultants : {}, [run]: { measurements: item[run].measurements.map((measurement) => measurement.n1Speed === speed ? { ...measurement, [field]: value } : measurement) } }));
   const save = () => {
     if (!calculation) return;
+
     const nextSaved = [calculation, ...saved.filter((item) => item.information.id !== calculation.information.id)];
-    setSavedState({ calculations: nextSaved });
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(nextSaved));
-      setStorageWriteError(null);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unknown storage error";
-      setStorageWriteError(`Calculation changes could not be saved in this browser: ${detail}`);
+    const result = persistSavedCalculations(nextSaved);
+    if (!result.ok) {
+      const message = `Calculation changes could not be saved in this browser: ${result.error}. The in-memory calculation remains available, but it is not yet confirmed to survive reload.`;
+      setStorageWriteError(message);
+      return;
     }
+
+    setSavedState({ calculations: nextSaved, warning: savedState.warning });
+    setStorageWriteError(null);
   };
   const start = (item = createCalculation()) => { setCalculation(item); setStep(0); };
 

@@ -302,7 +302,11 @@ export function findCommonIntersection(
  * manual's instruction to use the centre of that common area.
  */
 export function findBestFitCommonIntersection(circles: Circle[]): Point | null {
-  if (circles.length < 2) {
+  if (!areValidCircles(circles) || circles.length < 2) {
+    return null;
+  }
+
+  if (!hasCommonArea(circles, geometryTolerance(circles))) {
     return null;
   }
 
@@ -318,17 +322,19 @@ export function findBestFitCommonIntersection(circles: Circle[]): Point | null {
 
   const candidates = startingPoints
     .map((startingPoint) => refineCircleIntersection(circles, startingPoint))
-    .filter((point): point is Point => point !== null);
+    .filter((point): point is Point => point !== null && Number.isFinite(point.x) && Number.isFinite(point.y));
 
   if (candidates.length === 0) {
     return null;
   }
 
-  return candidates.reduce((best, candidate) =>
-    circleResidualSum(circles, candidate) < circleResidualSum(circles, best)
+  const best = candidates.reduce((bestPoint, candidate) =>
+    circleResidualSum(circles, candidate) < circleResidualSum(circles, bestPoint)
       ? candidate
-      : best
+      : bestPoint
   );
+
+  return pointIsInCommonArea(best, circles, geometryTolerance(circles)) ? best : null;
 }
 
 function refineCircleIntersection(circles: Circle[], startingPoint: Point): Point | null {
@@ -391,19 +397,16 @@ export function calculateThreeShotGeometry(
 ): ThreeShotGeometryResult {
   const { initialCircle, firstCircle, secondCircle, thirdCircle } = buildThreeShotCircles(input);
 
-  const resultantPoint = findBestFitCommonIntersection([
-    firstCircle,
-    secondCircle,
-    thirdCircle,
-  ]);
+  const circles = [firstCircle, secondCircle, thirdCircle];
+  const resultantPoint = findBestFitCommonIntersection(circles);
 
   if (!resultantPoint) {
-    throw new Error("Unable to determine a resultant from the three run circles.");
+    throw new Error("Unable to determine a resultant from the three run circles: no valid common overlap exists.");
   }
 
   const resultantAmplitude = distance(resultantPoint, initialCircle.center);
-  if (resultantAmplitude === 0) {
-    throw new Error("Resultant amplitude is zero; W6 and sensitivity are undefined.");
+  if (!Number.isFinite(resultantAmplitude) || resultantAmplitude <= 0) {
+    throw new Error("Resultant amplitude is zero or invalid; W6 and sensitivity are undefined.");
   }
 
   return {

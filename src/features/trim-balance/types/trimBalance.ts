@@ -39,6 +39,14 @@ export type CalculationStatus =
   | "Final Run Completed"
   | "Completed";
 
+export const CALCULATION_STATUSES = [
+  "Draft",
+  "In Progress",
+  "Correction Calculated",
+  "Final Run Completed",
+  "Completed",
+] as const satisfies readonly CalculationStatus[];
+
 export interface VibrationLimit {
   bearing?: number;
   ffccv?: number;
