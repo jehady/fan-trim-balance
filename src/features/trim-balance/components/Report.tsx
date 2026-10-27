@@ -1,21 +1,29 @@
 import { buildThreeShotCircles, validateResultantSelection } from "../calculations/geometry";
-import { buildSelectedBalancePoints, calculateSelectedPairwiseAnalysis, calculateSelectedResultMetrics, validateAllSelectedResultants, type SelectedResultants } from "../calculations/selectedResultants";
+import { calculateSelectedPairwiseAnalysis, calculateSelectedResultMetrics, validateSelectedResultants, type SelectedResultants } from "../calculations/selectedResultants";
 import { evaluateFinalRun } from "../calculations/finalRunEvaluation";
 import { poChartStatus, suppliedScrewFigureSource, testWeightConstantSource, trainingManualSource } from "../calculations/sourceProvenance";
-import { calculateFinalCorrectionFromPairwise } from "../calculations/finalCorrection";
+import { calculateFinalCorrection } from "../calculations/finalCorrection";
+import { CalculationValidationError } from "../calculations/calculationValidation";
+import { findPlotPointCutoffTies } from "../calculations/selectPlotPoints";
 import type { PairwiseAnalysis } from "../calculations/pairwiseAnalysis";
 import type { buildPlotPoints } from "../calculations/buildPlotPoints";
 import type { EngineRun, PlotPointLabel, TrimBalanceCalculation } from "../types/trimBalance";
+import { reportPersistenceState } from "../utils/reportPersistence";
+import { testScrewSpacingWarning } from "../utils/validation";
 
 const number = (value: number) => Number.isFinite(value) ? String(value) : "—";
 const speedLabel = (speed: string) => speed === "TO" ? "TO" : `${speed}%`;
 
-export function Report({ calculation, points, selectedResultants, inputErrors }: {
+export function Report({ calculation, points, selectedResultants, inputErrors, persistedSnapshot }: {
   calculation: TrimBalanceCalculation;
   points: ReturnType<typeof buildPlotPoints>;
   selectedResultants: SelectedResultants;
   inputErrors: string[];
+  persistedSnapshot: TrimBalanceCalculation | null;
 }) {
+  const persistenceState = reportPersistenceState(calculation, persistedSnapshot);
+  const spacingWarning = testScrewSpacingWarning(calculation.testScrewPositions);
+  const cutoffTies = findPlotPointCutoffTies(calculation.initialRun);
   const evaluation = evaluateFinalRun(calculation.initialRun, calculation.finalRun, calculation.limits, calculation.limitSources);
   const currentCircles = Object.fromEntries(points.map((point) => [point.label, buildThreeShotCircles({
     initialVibration: point.initialVibration,
@@ -26,14 +34,32 @@ export function Report({ calculation, points, selectedResultants, inputErrors }:
     secondTestScrewPosition: calculation.testScrewPositions.second,
     thirdTestScrewPosition: calculation.testScrewPositions.third,
   })]));
-  const resultantsComplete = !inputErrors.length &&
-    validateAllSelectedResultants(points, selectedResultants, currentCircles);
-  const currentPairs = resultantsComplete
-    ? calculateSelectedPairwiseAnalysis(points, selectedResultants)
-    : [];
-  const currentCorrection = resultantsComplete
-    ? calculateFinalCorrectionFromPairwise(buildSelectedBalancePoints(points, selectedResultants), currentPairs)
-    : undefined;
+  const validatedSelections = Object.fromEntries(points.flatMap((point) => {
+    const selected = selectedResultants[point.label];
+    const circles = currentCircles[point.label];
+    if (!selected || !circles) {
+      return [];
+    }
+    return validateResultantSelection([circles.firstCircle, circles.secondCircle, circles.thirdCircle], selected).valid
+      ? [[point.label, selected]]
+      : [];
+  })) as SelectedResultants;
+  const resultantValidation = validateSelectedResultants(points, validatedSelections, calculation.testScrewPositions);
+  const resultantsComplete = !inputErrors.length && resultantValidation.valid;
+  let currentPairs: PairwiseAnalysis[] = [];
+  let currentCorrection: ReturnType<typeof calculateFinalCorrection> | undefined;
+  let correctionError: string | null = null;
+  if (resultantsComplete) {
+    try {
+      currentPairs = calculateSelectedPairwiseAnalysis(points, validatedSelections, calculation.testScrewPositions);
+      currentCorrection = calculateFinalCorrection(points, validatedSelections, calculation.testScrewPositions, currentPairs);
+    } catch (error) {
+      if (!(error instanceof CalculationValidationError)) {
+        throw error;
+      }
+      correctionError = error.message;
+    }
+  }
   const validSelection = (label: PlotPointLabel) => {
     const point = points.find((candidate) => candidate.label === label);
     const selected = selectedResultants[label];
@@ -63,8 +89,10 @@ export function Report({ calculation, points, selectedResultants, inputErrors }:
       <dt>Initial installed screw configuration</dt><dd>{calculation.information.initialScrewConfiguration || "Not recorded"}</dd>
       <dt>Applicability status</dt><dd>UNVERIFIED — the supplied Airbus AMM figure does not establish CFM56-7B applicability.</dd>
       <dt>Calculation completeness</dt><dd>{resultantsComplete ? "Six valid A–F resultants confirmed" : "Incomplete — final correction is unavailable"}</dd>
+      <dt>Report state</dt><dd>{reportStateLabel(persistenceState, calculation, persistedSnapshot)}</dd>
       <dt>Test screw positions (first / second / third)</dt><dd>{calculation.testScrewPositions.first} / {calculation.testScrewPositions.second} / {calculation.testScrewPositions.third} — recorded values, applicability unverified</dd>
-      <dt>Common-area interpretation</dt><dd>Selections are checked for overlap membership. The software does not enforce the training manual's graphical "center of common area" instruction.</dd>
+      <dt>Test-weight spacing check</dt><dd>{spacingWarning ?? "Recorded positions are equally spaced by 12 screw intervals; training-data applicability remains unverified."}</dd>
+      <dt>Common-area interpretation</dt><dd>Selections are checked for overlap membership. A computed best-fit point is available as a convenience; it does not establish an approved resultant or enforce the training manual's graphical "center of common area" instruction.</dd>
     </dl>
     <h3>Source documents and calculation basis</h3>
     <div className="table-wrap"><table><thead><tr><th>Document / source</th><th>Revision / date</th><th>Effectivity</th><th>Section / figure</th><th>Status / use</th></tr></thead><tbody>
@@ -84,6 +112,7 @@ export function Report({ calculation, points, selectedResultants, inputErrors }:
       ["Third", calculation.thirdRun],
     ]} />
     <h3>A–F point selections and resultants</h3>
+    {cutoffTies.map((tie) => <div className="validation" role="alert" key={tie.sensor}><strong>Review the {tie.sensor} plot-point selection tie.</strong><p>The third and fourth ranked readings are both {tie.vibration} mils ({tie.speeds.join(", ")}). The deterministic higher-N1-first tie order is used for reproducibility; no tie rule is established by the training manual.</p></div>)}
     <div className="table-wrap"><table><thead><tr><th>Point</th><th>Sensor / N1</th><th>Initial</th><th>First / second / third</th><th>Selected resultant (x, y)</th><th>R1 / angle</th><th>W6 / sensitivity</th><th>Validation</th></tr></thead><tbody>
       {points.map((point) => {
         const selected = selectedResultants[point.label];
@@ -93,8 +122,8 @@ export function Report({ calculation, points, selectedResultants, inputErrors }:
       })}
     </tbody></table></div>
     <h3>Pairwise analysis</h3>
-    {resultantsComplete ? <div className="table-wrap"><table><thead><tr><th>Pair</th><th>Distance (cm·g)</th><th>Sensitivity sum</th><th>U</th></tr></thead><tbody>{currentPairs.map((pair) => <PairRow key={pair.pair} pair={pair} />)}</tbody></table></div> : <p>Not calculated: all six resultants are not currently confirmed and valid for the current run inputs.</p>}
-    <dl className="report-list"><dt>Maximum-U pair</dt><dd>{resultantsComplete ? currentPairs.reduce<PairwiseAnalysis | undefined>((max, pair) => !max || pair.amplitude > max.amplitude ? pair : max, undefined)?.pair ?? "Unavailable" : "Unavailable — incomplete resultants"}</dd>
+    {resultantsComplete && !correctionError ? <div className="table-wrap"><table><thead><tr><th>Pair</th><th>Distance (cm·g)</th><th>Sensitivity sum</th><th>U</th></tr></thead><tbody>{currentPairs.map((pair) => <PairRow key={pair.pair} pair={pair} />)}</tbody></table></div> : <p>{correctionError ?? "Not calculated: all six resultants are not currently confirmed and valid for the current run inputs."}</p>}
+    <dl className="report-list"><dt>Maximum-U pair</dt><dd>{resultantsComplete && !correctionError ? currentPairs.reduce<PairwiseAnalysis | undefined>((max, pair) => !max || pair.amplitude > max.amplitude ? pair : max, undefined)?.pair ?? "Unavailable" : "Unavailable — correction inputs are incomplete or invalid"}</dd>
       <dt>Final correction magnitude / angle</dt><dd>{currentCorrection ? `${number(currentCorrection.finalWeightCmG)} cm·g @ ${number(currentCorrection.finalAngleDeg)}°` : "Unavailable — six valid resultants required"}</dd>
       <dt>PO weight selection / physical installation</dt><dd>Unavailable — no applicable approved PO chart was supplied or verified. No hardware mapping is inferred.</dd></dl>
     <h3>Final run and configured limits</h3>
@@ -107,6 +136,20 @@ export function Report({ calculation, points, selectedResultants, inputErrors }:
     <FinalMeasurementTable rows={evaluation.rows} />
     {calculation.information.notes && <><h3>Notes</h3><p>{calculation.information.notes}</p></>}
   </section>;
+}
+
+function reportStateLabel(
+  state: ReturnType<typeof reportPersistenceState>,
+  calculation: TrimBalanceCalculation,
+  persistedSnapshot: TrimBalanceCalculation | null
+): string {
+  if (state === "saved-record") {
+    return `Saved record ${calculation.information.id}; report matches the current persisted record.`;
+  }
+  if (state === "unsaved-edits") {
+    return `Unsaved edits; report reflects the current in-memory calculation, not saved record ${persistedSnapshot?.information.id ?? "—"}.`;
+  }
+  return "Live draft; this calculation has not been confirmed as persisted.";
 }
 
 function MeasurementTable({ runs }: { runs: [string, EngineRun][] }) {

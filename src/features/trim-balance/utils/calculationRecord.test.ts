@@ -22,6 +22,23 @@ describe("calculation record persistence", () => {
     expect(restoreCalculation(stored)).toBeNull();
   });
 
+  it("rejects persisted runs with duplicate, missing, or unexpected measurement rows", () => {
+    const duplicateSpeed = persistedCalculation() as Record<string, unknown>;
+    const run = duplicateSpeed.initialRun as { measurements: Array<Record<string, unknown>> };
+    run.measurements[1].n1Speed = run.measurements[0].n1Speed;
+    expect(restoreCalculation(duplicateSpeed)).toBeNull();
+
+    const missingRow = persistedCalculation() as Record<string, unknown>;
+    const missingRun = missingRow.secondRun as { measurements: unknown[] };
+    missingRun.measurements.pop();
+    expect(restoreCalculation(missingRow)).toBeNull();
+
+    const unexpectedRow = persistedCalculation() as Record<string, unknown>;
+    const extraRun = unexpectedRow.thirdRun as { measurements: unknown[] };
+    extraRun.measurements.push({ n1Speed: "100", bearingVibration: 1, ffccvVibration: 1 });
+    expect(restoreCalculation(unexpectedRow)).toBeNull();
+  });
+
   it("rejects invalid limits and screw positions", () => {
     const invalidLimit = persistedCalculation() as Record<string, unknown>;
     invalidLimit.limits = { bearing: -1 };
@@ -49,17 +66,37 @@ describe("calculation record persistence", () => {
     expect(restoreCalculation(stored)).toBeNull();
   });
 
+  it("normalizes legacy completion-status values for compatibility", () => {
+    const legacyStatus = persistedCalculation() as Record<string, unknown>;
+    legacyStatus.status = "Final Run Completed";
+    expect(restoreCalculation(legacyStatus)?.status).toBe("In Progress");
+
+    const legacyStepStatus = persistedCalculation() as Record<string, unknown>;
+    legacyStepStatus.status = "Correction Calculated";
+    expect(restoreCalculation(legacyStepStatus)?.status).toBe("In Progress");
+
+    const oldCompleted = persistedCalculation() as Record<string, unknown>;
+    oldCompleted.status = "Completed";
+    expect(restoreCalculation(oldCompleted)?.status).toBe("In Progress");
+  });
+
   it("loads legacy records without resultants or the newer configuration fields", () => {
     const stored = persistedCalculation() as Record<string, unknown>;
     delete stored.selectedResultants;
     const information = stored.information as Record<string, unknown>;
     delete information.aircraftType;
     delete information.aircraftEffectivity;
+    information.id = "legacy-record-id";
+    const initialRun = stored.initialRun as { measurements: Array<{ bearingVibration: number | null; ffccvVibration: number | null }> };
+    initialRun.measurements[0].bearingVibration = 4.25;
+    initialRun.measurements[0].ffccvVibration = 3.75;
 
     const restored = restoreCalculation(stored);
     expect(restored?.selectedResultants).toEqual({});
     expect(restored?.information.aircraftType).toBe("");
     expect(restored?.information.aircraftEffectivity).toBe("");
+    expect(restored?.information.id).toBe("legacy-record-id");
+    expect(restored?.initialRun.measurements[0]).toMatchObject({ bearingVibration: 4.25, ffccvVibration: 3.75 });
   });
 
   it("rejects malformed resultant selections instead of restoring them", () => {

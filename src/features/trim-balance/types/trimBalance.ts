@@ -32,20 +32,23 @@ export interface CalculationInformation {
   notes: string;
 }
 
-export type CalculationStatus =
-  | "Draft"
-  | "In Progress"
-  | "Correction Calculated"
-  | "Final Run Completed"
-  | "Completed";
-
 export const CALCULATION_STATUSES = [
   "Draft",
   "In Progress",
-  "Correction Calculated",
-  "Final Run Completed",
-  "Completed",
-] as const satisfies readonly CalculationStatus[];
+] as const;
+
+export type CalculationStatus = typeof CALCULATION_STATUSES[number];
+
+export function normalizeCalculationStatus(value: unknown): CalculationStatus {
+  if (value === "Draft" || value === "In Progress") {
+    return value;
+  }
+  // Legacy completion labels do not establish this workflow's completion criteria.
+  if (value === "Completed" || value === "Correction Calculated" || value === "Final Run Completed") {
+    return "In Progress";
+  }
+  return "Draft";
+}
 
 export interface VibrationLimit {
   bearing?: number;

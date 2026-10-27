@@ -1,50 +1,41 @@
 import type { ThreeShotInput } from "../types/trimBalance";
 
+const n1Speeds = ["TO", "93.7", "85", "81", "66", "54"] as const;
+
+function run(
+  bearing: readonly number[],
+  ffccv: readonly number[]
+): ThreeShotInput["initialRun"] {
+  return {
+    measurements: n1Speeds.map((n1Speed, index) => ({
+      n1Speed,
+      bearingVibration: bearing[index],
+      ffccvVibration: ffccv[index],
+    })),
+  };
+}
+
 export const exampleInput: ThreeShotInput = {
-  initialRun: {
-    measurements: [
-      {
-        n1Speed: "TO",
-        bearingVibration: 6.5,
-        ffccvVibration: 3.2,
-      },
-      {
-        n1Speed: "93.7",
-        bearingVibration: 4.2,
-        ffccvVibration: 4.8,
-      },
-      {
-        n1Speed: "85",
-        bearingVibration: 3.8,
-        ffccvVibration: 2.9,
-      },
-      {
-        n1Speed: "81",
-        bearingVibration: 2.7,
-        ffccvVibration: 5.4,
-      },
-      {
-        n1Speed: "66",
-        bearingVibration: 2.1,
-        ffccvVibration: 2.6,
-      },
-      {
-        n1Speed: "54",
-        bearingVibration: 1.8,
-        ffccvVibration: 2.0,
-      },
-    ],
-  },
-
-  firstRun: {
-    measurements: [],
-  },
-
-  secondRun: {
-    measurements: [],
-  },
-
-  thirdRun: {
-    measurements: [],
-  },
+  initialRun: run(
+    [6.5, 6.0, 5.5, 5.0, 4.5, 4.0],
+    [4.0, 3.5, 3.0, 2.5, 2.5, 2.0]
+  ),
+  firstRun: run(
+    [4.0, 4.0, 3.5, 3.5, 3.0, 3.5],
+    [3.0, 2.0, 2.5, 2.5, 2.5, 2.0]
+  ),
+  secondRun: run(
+    [8.6, 7.0, 7.0, 5.0, 4.5, 4.0],
+    [4.0, 4.5, 3.0, 2.5, 2.5, 2.0]
+  ),
+  thirdRun: run(
+    [7.8, 8.0, 6.6, 5.0, 4.5, 4.0],
+    [6.0, 4.5, 4.0, 2.5, 2.5, 2.0]
+  ),
 };
+
+export const exampleTestScrewPositions = {
+  first: 35,
+  second: 23,
+  third: 11,
+} as const;

@@ -1,4 +1,4 @@
-import { N1_SPEEDS, type CalculationInformation, type EngineRun, type TrimBalanceCalculation } from "../types/trimBalance";
+import { N1_SPEEDS, normalizeCalculationStatus, type CalculationInformation, type EngineRun, type TrimBalanceCalculation } from "../types/trimBalance";
 
 export const storageKey = "cfm56-7b-trim-balance-calculations";
 
@@ -6,10 +6,12 @@ export const blankRun = (): EngineRun => ({
   measurements: N1_SPEEDS.map((n1Speed) => ({ n1Speed, bearingVibration: Number.NaN, ffccvVibration: Number.NaN })),
 });
 
-export function createCalculation(): TrimBalanceCalculation {
-  const now = new Date();
+export function createCalculation(now = new Date()): TrimBalanceCalculation {
+  const date = now.toISOString().slice(0, 10).replaceAll("-", "");
+  const uniquePart = globalThis.crypto?.randomUUID?.() ??
+    `${now.getTime().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
   return {
-    information: { id: `TB-${now.toISOString().slice(0, 10).replaceAll("-", "")}`, aircraftType: "", aircraftRegistration: "", aircraftEffectivity: "", initialScrewConfiguration: "", engineSerialNumber: "", engineModel: "CFM56-7B", date: now.toISOString().slice(0, 10), technician: "", notes: "" },
+    information: { id: `TB-${date}-${uniquePart}`, aircraftType: "", aircraftRegistration: "", aircraftEffectivity: "", initialScrewConfiguration: "", engineSerialNumber: "", engineModel: "CFM56-7B", date: now.toISOString().slice(0, 10), technician: "", notes: "" },
     initialRun: blankRun(),
     firstRun: blankRun(),
     secondRun: blankRun(),
@@ -35,6 +37,14 @@ function isMeasurementValue(value: unknown): value is number | null {
 function normalizeRun(value: unknown): EngineRun | null {
   if (!isRecord(value) || !Array.isArray(value.measurements)) return null;
   const rawMeasurements = value.measurements;
+  if (rawMeasurements.length !== N1_SPEEDS.length) return null;
+  const speeds = rawMeasurements.map((measurement) =>
+    isRecord(measurement) && typeof measurement.n1Speed === "string" ? measurement.n1Speed : null
+  );
+  if (speeds.some((speed) => speed === null || !N1_SPEEDS.includes(speed as typeof N1_SPEEDS[number])) ||
+    new Set(speeds).size !== N1_SPEEDS.length) {
+    return null;
+  }
   const measurements = N1_SPEEDS.map((n1Speed) => {
     const source = rawMeasurements.find((item: unknown) => isRecord(item) && item.n1Speed === n1Speed);
     if (!isRecord(source) || !isMeasurementValue(source.bearingVibration) || !isMeasurementValue(source.ffccvVibration)) return null;
@@ -43,8 +53,11 @@ function normalizeRun(value: unknown): EngineRun | null {
   return measurements.every((measurement) => measurement !== null) ? { measurements } as EngineRun : null;
 }
 
-function isValidStatus(value: unknown): value is TrimBalanceCalculation["status"] {
-  return typeof value === "string" && ["Draft", "In Progress", "Correction Calculated", "Final Run Completed", "Completed"].includes(value);
+function isValidStatus(value: unknown): value is string {
+  return typeof value === "string" && (
+    value === "Draft" || value === "In Progress" || value === "Completed" ||
+    value === "Correction Calculated" || value === "Final Run Completed"
+  );
 }
 
 function isValidLimits(value: unknown): value is TrimBalanceCalculation["limits"] {
@@ -109,6 +122,7 @@ export function restoreCalculation(item: unknown): TrimBalanceCalculation | null
   const information = item.information as CalculationInformation;
   return {
     ...item,
+    status: normalizeCalculationStatus(item.status),
     information: {
       ...information,
       aircraftType: information.aircraftType ?? "",

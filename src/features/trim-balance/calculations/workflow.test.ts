@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { calculateBalanceWeight, calculateSensitivity } from "./balanceWeight";
 import { buildPlotPoints } from "./buildPlotPoints";
-import { calculatePairwiseAnalysis } from "./pairwiseAnalysis";
-import { calculateSelectedPairwiseAnalysis, calculateSelectedResultMetrics, storeSelectedResultant, validateAllSelectedResultants, type SelectedResultants } from "./selectedResultants";
-import type { ThreeShotCircles } from "./geometry";
-import { calculateFinalCorrection, calculateFinalCorrectionFromPairwise, selectMaximumUPair } from "./finalCorrection";
-import { selectInitialPlotPoints } from "./selectPlotPoints";
-import { validateEngineRun } from "../utils/validation";
+import type { PairwiseAnalysis } from "./pairwiseAnalysis";
+import { calculateSelectedPairwiseAnalysis, calculateSelectedResultMetrics, storeSelectedResultant, validateAllSelectedResultants, validateSelectedResultants, type SelectedResultants } from "./selectedResultants";
+import { calculateFinalCorrection } from "./finalCorrection";
+import { findPlotPointCutoffTies, selectInitialPlotPoints } from "./selectPlotPoints";
+import { TEST_SCREW_SPACING_ERROR, testScrewSpacingWarning, validateEngineRun, validateTestScrewSpacing, validateThreeShotInput } from "../utils/validation";
+import { exampleInput } from "../utils/testData";
 import type { EngineRun } from "../types/trimBalance";
 
 const initial: EngineRun = { measurements: [
@@ -18,38 +18,36 @@ const initial: EngineRun = { measurements: [
   { n1Speed: "54", bearingVibration: 1, ffccvVibration: 3 },
 ] };
 const laterRun: EngineRun = { measurements: initial.measurements.map((item) => ({ ...item, bearingVibration: item.bearingVibration + 1, ffccvVibration: item.ffccvVibration + 1 })) };
+const labels = ["A", "B", "C", "D", "E", "F"] as const;
+function workflowFixture() {
+  const points = labels.map((label, index) => ({
+    label,
+    sensor: index < 3 ? "bearing" as const : "ffccv" as const,
+    n1Speed: (["TO", "93.7", "85", "93.7", "81", "66"] as const)[index],
+    initialVibration: 10,
+    firstVibration: 20,
+    secondVibration: 20,
+    thirdVibration: 20,
+  }));
+  const testScrewPositions = { first: 35, second: 23, third: 11 };
+  const selections = labels.reduce((current, label, index) =>
+    storeSelectedResultant(current, label, { x: index + 1, y: index + 2 }), {} as SelectedResultants);
+  return { points, testScrewPositions, selections };
+}
 
 describe("workflow calculation primitives", () => {
   it.each([0, 1, 2, 3, 4, 5])("does not authorize final correction with %i confirmed resultants", (count) => {
-    const points = buildPlotPoints(initial, laterRun, laterRun, laterRun);
-    const circles: ThreeShotCircles = {
-      initialCircle: { center: { x: 0, y: 0 }, radius: 5 },
-      firstCircle: { center: { x: 0, y: 0 }, radius: 5 },
-      secondCircle: { center: { x: 1, y: 0 }, radius: 5 },
-      thirdCircle: { center: { x: 0, y: 1 }, radius: 5 },
-    };
-    const circlesByLabel = Object.fromEntries(points.map((point) => [point.label, circles]));
+    const { points, testScrewPositions } = workflowFixture();
     const selections = points.slice(0, count).reduce(
       (current, point) => storeSelectedResultant(current, point.label, { x: 1, y: 1 }),
       {} as SelectedResultants
     );
-    expect(validateAllSelectedResultants(points, selections, circlesByLabel)).toBe(false);
+    expect(validateAllSelectedResultants(points, selections, testScrewPositions)).toBe(false);
   });
 
   it("authorizes complete correction only when all six resultants are valid", () => {
-    const points = buildPlotPoints(initial, laterRun, laterRun, laterRun);
-    const circles: ThreeShotCircles = {
-      initialCircle: { center: { x: 0, y: 0 }, radius: 5 },
-      firstCircle: { center: { x: 0, y: 0 }, radius: 5 },
-      secondCircle: { center: { x: 1, y: 0 }, radius: 5 },
-      thirdCircle: { center: { x: 0, y: 1 }, radius: 5 },
-    };
-    const circlesByLabel = Object.fromEntries(points.map((point) => [point.label, circles]));
-    const selections = points.reduce(
-      (current, point) => storeSelectedResultant(current, point.label, { x: 1, y: 1 }),
-      {} as SelectedResultants
-    );
-    expect(validateAllSelectedResultants(points, selections, circlesByLabel)).toBe(true);
+    const { points, testScrewPositions, selections } = workflowFixture();
+    expect(validateAllSelectedResultants(points, selections, testScrewPositions)).toBe(true);
   });
 
   it("reports missing and invalid N1 measurements", () => {
@@ -58,6 +56,50 @@ describe("workflow calculation primitives", () => {
 
   it("selects the top three initial amplitudes for each sensor", () => {
     expect(selectInitialPlotPoints(initial).map((point) => point.n1Speed)).toEqual(["TO", "93.7", "85", "93.7", "81", "66"]);
+  });
+
+  it("reports cutoff ties without inventing a tie-breaking rule", () => {
+    const tiedInput = {
+      measurements: initial.measurements.map((measurement) =>
+        measurement.n1Speed === "81" ? { ...measurement, bearingVibration: 4 } : measurement
+      ),
+    };
+    expect(findPlotPointCutoffTies(tiedInput)).toEqual([
+      { sensor: "bearing", vibration: 4, speeds: ["85", "81"] },
+    ]);
+    expect(selectInitialPlotPoints(tiedInput).slice(0, 3).map(({ n1Speed }) => n1Speed)).toEqual(["TO", "93.7", "85"]);
+    expect(selectInitialPlotPoints({ measurements: [...tiedInput.measurements].reverse() }).slice(0, 3).map(({ n1Speed }) => n1Speed)).toEqual(["TO", "93.7", "85"]);
+
+    const nonCutoffTie = {
+      measurements: initial.measurements.map((measurement) =>
+        measurement.n1Speed === "93.7" ? { ...measurement, bearingVibration: 6 } : measurement
+      ),
+    };
+    expect(findPlotPointCutoffTies(nonCutoffTie)).toEqual([]);
+  });
+
+  it("warns when recorded test positions do not match equally spaced 120-degree positions", () => {
+    expect(testScrewSpacingWarning({ first: 35, second: 23, third: 11 })).toBeUndefined();
+    expect(testScrewSpacingWarning({ first: 1, second: 13, third: 25 })).toBeUndefined();
+    expect(testScrewSpacingWarning({ first: 35, second: 23, third: 10 })).toContain(TEST_SCREW_SPACING_ERROR);
+  });
+
+  it.each([
+    [{ first: 35, second: 23, third: 11 }, true],
+    [{ first: 35, second: 23, third: 12 }, false],
+    [{ first: 1, second: 13, third: 25 }, true],
+    [{ first: 1, second: 25, third: 13 }, true],
+  ] as const)("validates 120-degree test-position spacing for %j", (positions, valid) => {
+    expect(validateTestScrewSpacing(positions)).toBe(valid ? undefined : TEST_SCREW_SPACING_ERROR);
+    const errors = validateThreeShotInput({ ...exampleInput, testScrewPositions: positions });
+    expect(errors.includes(TEST_SCREW_SPACING_ERROR)).toBe(!valid);
+  });
+
+  it("rejects unspaced positions at the selected-resultant calculation boundary", () => {
+    const { points, selections } = workflowFixture();
+    const validation = validateSelectedResultants(points, selections, { first: 35, second: 23, third: 12 });
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toContain(TEST_SCREW_SPACING_ERROR);
   });
 
   it("labels the three highest initial amplitudes independently for each sensor", () => {
@@ -75,12 +117,20 @@ describe("workflow calculation primitives", () => {
     expect(calculateSensitivity(2.7)).toBeCloseTo(308, 0);
   });
 
-  it("calculates pairwise distance, combined sensitivity, and U", () => {
-    const result = calculatePairwiseAnalysis([
-      { label: "A", point: { x: 0, y: 0 }, sensitivity: 10 },
-      { label: "B", point: { x: 30, y: 40 }, sensitivity: 15 },
-    ]);
-    expect(result).toEqual([{ pair: "AB", distanceCmG: 50, combinedSensitivity: 25, amplitude: 2 }]);
+  it("calculates pairwise distance, combined sensitivity, and U from validated selections", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    const result = calculateSelectedPairwiseAnalysis(points, selections, testScrewPositions);
+    const pair = result.find((item) => item.pair === "AB");
+    const firstMetrics = calculateSelectedResultMetrics(points[0], selections.A)!;
+    const secondMetrics = calculateSelectedResultMetrics(points[1], selections.B)!;
+    const expectedDistance = Math.hypot(
+      firstMetrics.w6CmG * Math.sin(firstMetrics.resultantAngleDeg * Math.PI / 180) - secondMetrics.w6CmG * Math.sin(secondMetrics.resultantAngleDeg * Math.PI / 180),
+      firstMetrics.w6CmG * Math.cos(firstMetrics.resultantAngleDeg * Math.PI / 180) - secondMetrics.w6CmG * Math.cos(secondMetrics.resultantAngleDeg * Math.PI / 180)
+    );
+    expect(pair?.distanceCmG).toBeCloseTo(expectedDistance);
+    expect(pair?.combinedSensitivity).toBeCloseTo(firstMetrics.sensitivity + secondMetrics.sensitivity);
+    expect(pair?.amplitude).toBeCloseTo(expectedDistance / (firstMetrics.sensitivity + secondMetrics.sensitivity));
+    expect(result).toHaveLength(15);
   });
 
   it("stores each A-F selection and uses the confirmed selections for Step 8", () => {
@@ -99,20 +149,18 @@ describe("workflow calculation primitives", () => {
   });
 
   it("changes Step 8 pairwise results when a confirmed A-F selection changes", () => {
-    const points = buildPlotPoints(initial, laterRun, laterRun, laterRun);
-    const firstSelections = ["A", "B", "C", "D", "E", "F"].reduce((current, label, index) => storeSelectedResultant(current, label as keyof SelectedResultants, { x: index + 1, y: index + 2 }), {} as SelectedResultants);
-    const changedSelections = storeSelectedResultant(firstSelections, "A", { x: 20, y: 2 });
-    const firstPairwise = calculateSelectedPairwiseAnalysis(points, firstSelections);
-    const changedPairwise = calculateSelectedPairwiseAnalysis(points, changedSelections);
+    const { points, testScrewPositions, selections: firstSelections } = workflowFixture();
+    const changedSelections = storeSelectedResultant(firstSelections, "A", { x: 2, y: 2 });
+    const firstPairwise = calculateSelectedPairwiseAnalysis(points, firstSelections, testScrewPositions);
+    const changedPairwise = calculateSelectedPairwiseAnalysis(points, changedSelections, testScrewPositions);
 
     expect(changedPairwise.find((pair) => pair.pair === "AB")?.distanceCmG).not.toBe(firstPairwise.find((pair) => pair.pair === "AB")?.distanceCmG);
     expect(changedPairwise.find((pair) => pair.pair === "AB")?.combinedSensitivity).not.toBe(firstPairwise.find((pair) => pair.pair === "AB")?.combinedSensitivity);
   });
 
   it("does not use automatic/reference geometry when user selections are valid", () => {
-    const points = buildPlotPoints(initial, laterRun, laterRun, laterRun);
-    const selections = ["A", "B", "C", "D", "E", "F"].reduce((current, label, index) => storeSelectedResultant(current, label as keyof SelectedResultants, { x: index + 1, y: index + 2 }), {} as SelectedResultants);
-    const pairwise = calculateSelectedPairwiseAnalysis(points, selections);
+    const { points, testScrewPositions, selections } = workflowFixture();
+    const pairwise = calculateSelectedPairwiseAnalysis(points, selections, testScrewPositions);
     const pointA = calculateSelectedResultMetrics(points[0], selections.A);
     const pointB = calculateSelectedResultMetrics(points[1], selections.B);
     const expectedDistance = Math.hypot(pointA!.w6CmG * Math.sin(pointA!.resultantAngleDeg * Math.PI / 180) - pointB!.w6CmG * Math.sin(pointB!.resultantAngleDeg * Math.PI / 180), pointA!.w6CmG * Math.cos(pointA!.resultantAngleDeg * Math.PI / 180) - pointB!.w6CmG * Math.cos(pointB!.resultantAngleDeg * Math.PI / 180));
@@ -121,51 +169,81 @@ describe("workflow calculation primitives", () => {
     expect(pairwise).toHaveLength(15);
   });
 
-  it("selects the maximum-U pair for final correction", () => {
-    const pairs = [
-      { pair: "AB", distanceCmG: 10, combinedSensitivity: 10, amplitude: 1 },
-      { pair: "AD", distanceCmG: 25, combinedSensitivity: 10, amplitude: 2.5 },
-      { pair: "BC", distanceCmG: 20, combinedSensitivity: 20, amplitude: 1 },
-    ];
+  it("uses current validated A-F selections for final correction", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    const firstResult = calculateFinalCorrection(points, selections, testScrewPositions);
+    const changedSelections = storeSelectedResultant(selections, "A", { x: 2, y: 2 });
+    const changedResult = calculateFinalCorrection(points, changedSelections, testScrewPositions);
 
-    expect(selectMaximumUPair(pairs)?.pair).toBe("AD");
+    expect(Number.isFinite(firstResult.finalWeightCmG)).toBe(true);
+    expect(changedResult.finalWeightCmG).not.toBe(firstResult.finalWeightCmG);
   });
 
-  it("calculates final vector, correction weight, and angle from the selected pair", () => {
-    const result = calculateFinalCorrection(
-      { label: "A", point: { x: 0, y: 0 }, sensitivity: 1 },
-      { label: "B", point: { x: 3, y: 4 }, sensitivity: 1 },
-      { pair: "AB", distanceCmG: 5, combinedSensitivity: 2, amplitude: 2.5 }
-    );
-
-    expect(result.finalPoint.x).toBeCloseTo(1.5);
-    expect(result.finalPoint.y).toBeCloseTo(2);
-    expect(result.finalWeightCmG).toBeCloseTo(2.5);
-    expect(result.finalAngleDeg).toBeCloseTo(36.8699);
-    expect(result.distanceFromFirst).toBeCloseTo(2.5);
+  it.each([
+    ["only A and B", (selections: SelectedResultants) => ({ A: selections.A, B: selections.B })],
+    ["five resultants", (selections: SelectedResultants) => Object.fromEntries(labels.slice(0, 5).map((label) => [label, selections[label]])) as SelectedResultants],
+    ["missing label", (selections: SelectedResultants) => ({ A: selections.A, B: selections.B, C: selections.C, D: selections.D, E: selections.E })],
+    ["unexpected label", (selections: SelectedResultants) => ({ ...selections, G: { x: 1, y: 2 } } as SelectedResultants)],
+  ])("rejects %s at the final-correction boundary", (_name, selectionsFor) => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    expect(() => calculateFinalCorrection(points, selectionsFor(selections), testScrewPositions)).toThrow();
   });
 
-  it("uses the actual confirmed A-F selections for the final correction", () => {
-    const points = buildPlotPoints(initial, laterRun, laterRun, laterRun);
-    const selections = ["A", "B", "C", "D", "E", "F"].reduce((current, label, index) => storeSelectedResultant(current, label as keyof SelectedResultants, { x: index + 1, y: index + 2 }), {} as SelectedResultants);
-    const firstResult = calculateFinalCorrectionFromPairwise(
-      points.flatMap((point) => {
-        const metrics = calculateSelectedResultMetrics(point, selections[point.label]);
-        return metrics ? [{ label: point.label, point: { x: metrics.w6CmG * Math.sin(metrics.resultantAngleDeg * Math.PI / 180), y: metrics.w6CmG * Math.cos(metrics.resultantAngleDeg * Math.PI / 180) }, sensitivity: metrics.sensitivity }] : [];
-      }),
-      calculateSelectedPairwiseAnalysis(points, selections)
-    );
-    const changedSelections = storeSelectedResultant(selections, "A", { x: 20, y: 2 });
-    const changedResult = calculateFinalCorrectionFromPairwise(
-      points.flatMap((point) => {
-        const metrics = calculateSelectedResultMetrics(point, changedSelections[point.label]);
-        return metrics ? [{ label: point.label, point: { x: metrics.w6CmG * Math.sin(metrics.resultantAngleDeg * Math.PI / 180), y: metrics.w6CmG * Math.cos(metrics.resultantAngleDeg * Math.PI / 180) }, sensitivity: metrics.sensitivity }] : [];
-      }),
-      calculateSelectedPairwiseAnalysis(points, changedSelections)
-    );
+  it("rejects duplicate source labels and non-finite or invalid selected coordinates", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    const duplicatePoints = [...points.slice(0, 5), { ...points[5], label: "A" as const }];
+    expect(() => calculateSelectedPairwiseAnalysis(duplicatePoints, selections, testScrewPositions)).toThrow(/exactly one point/);
+    expect(() => calculateFinalCorrection(points, { ...selections, A: { x: Number.NaN, y: 1 } }, testScrewPositions)).toThrow(/finite|not finite/i);
+    expect(() => calculateFinalCorrection(points, { ...selections, A: { x: Infinity, y: 1 } }, testScrewPositions)).toThrow(/finite|not finite/i);
+    expect(() => calculateFinalCorrection(points, { ...selections, A: { x: 0, y: 0 } }, testScrewPositions)).toThrow(/zero|close to zero/i);
+  });
 
-    expect(firstResult?.finalWeightCmG).not.toBe(1550);
-    expect(firstResult?.finalAngleDeg).not.toBe(26);
-    expect(changedResult?.finalWeightCmG).not.toBe(firstResult?.finalWeightCmG);
+  it("rejects duplicated or incorrectly assigned A-F source measurements", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    const duplicateSource = [...points];
+    duplicateSource[1] = { ...duplicateSource[1], n1Speed: duplicateSource[0].n1Speed };
+    expect(() => calculateFinalCorrection(duplicateSource, selections, testScrewPositions)).toThrow(/unique.*sensor and N1-speed/i);
+    const wrongSensor = [...points];
+    wrongSensor[0] = { ...wrongSensor[0], sensor: "ffccv" };
+    expect(() => calculateFinalCorrection(wrongSensor, selections, testScrewPositions)).toThrow(/correctly assigned/i);
+  });
+
+  it("returns explicit validation failures for structurally malformed API inputs", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    expect(() => calculateFinalCorrection(points, null as unknown as SelectedResultants, testScrewPositions)).toThrow(/missing or malformed/i);
+    expect(() => calculateFinalCorrection(points, selections, null as unknown as typeof testScrewPositions)).toThrow(/missing or malformed/i);
+    expect(() => calculateFinalCorrection([null] as unknown as typeof points, selections, testScrewPositions)).toThrow(/plot point data.*malformed/i);
+    expect(() => calculateFinalCorrection(new Array(6) as typeof points, selections, testScrewPositions)).toThrow(/plot point data.*malformed/i);
+    expect(() => calculateFinalCorrection(points, { ...selections, A: null as unknown as { x: number; y: number } }, testScrewPositions)).toThrow(/coordinates must be finite/i);
+  });
+
+  it("rejects stale selections after source geometry changes", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    points[0] = { ...points[0], firstVibration: 0 };
+    expect(() => calculateFinalCorrection(points, selections, testScrewPositions)).toThrow(/A:/);
+  });
+
+  it("rejects malformed source measurements at the calculation boundary", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    points[0] = { ...points[0], secondVibration: Number.NaN };
+    expect(() => calculateFinalCorrection(points, selections, testScrewPositions)).toThrow(/A: current source measurements are invalid/);
+  });
+
+  it("rejects pair values inconsistent with the supplied points", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    const pairs = calculateSelectedPairwiseAnalysis(points, selections, testScrewPositions);
+    const invalidPairs = pairs as PairwiseAnalysis[];
+    invalidPairs[0] = { ...invalidPairs[0], amplitude: invalidPairs[0].amplitude + 1 };
+    expect(() => calculateFinalCorrection(points, selections, testScrewPositions, invalidPairs)).toThrow(/inconsistent/);
+    const invalidCombinedSensitivity = pairs.map((pair, index) => index === 0 ? { ...pair, combinedSensitivity: 0 } : pair);
+    expect(() => calculateFinalCorrection(points, selections, testScrewPositions, invalidCombinedSensitivity)).toThrow(/inconsistent/);
+    expect(() => calculateFinalCorrection(points, selections, testScrewPositions, pairs.slice(1))).toThrow(/incomplete|missing/i);
+    expect(() => calculateFinalCorrection(points, selections, testScrewPositions, [...pairs, pairs[0]])).toThrow(/incomplete|invalid/i);
+  });
+
+  it("rejects incomplete direct final-correction calls", () => {
+    const { points, testScrewPositions, selections } = workflowFixture();
+    expect(() => calculateFinalCorrection(points.slice(0, 2), selections, testScrewPositions)).toThrow(/exactly one point/);
+    expect(() => calculateFinalCorrection(points.slice(0, 5), selections, testScrewPositions)).toThrow(/exactly one point/);
   });
 });

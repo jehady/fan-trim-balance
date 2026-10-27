@@ -10,7 +10,11 @@ The supplied `www.pdf` is an Airbus A318/A319/A320/A321 AMM balancing-screw figu
 
 Final-run thresholds may be recorded with source references, but their applicability and comparison semantics are unverified. The app therefore reports `NOT EVALUATED` for maintenance compliance and separately shows screening against configured thresholds. Equality is not flagged by the current software comparison; this behavior is not represented as an approved maintenance rule.
 
-Step 7 validates that a selected point belongs to the common overlap of the three run circles. The training manual's instruction to select the *center* of that common area is graphical; the app does not compute or enforce a centroid/center point. That graphical judgment remains with the engineer. The boundary allowance is one SVG viewBox unit (one plotted-radius unit divided by 192), or the greater floating-point allowance (32 machine epsilons or 1e-9 of plot scale). This is only a geometry/pointer tolerance, not a vibration tolerance.
+The training manual describes AVM units with `1 AVM unit = 2 mils DA` (`3 units = 6 mils`; `1.5 AVM units = 3 mils DA`). Final-run threshold inputs in this app are in mils, not cockpit units. This conversion is shown as a unit caution only; the training source is unverified for a specific aircraft/engine configuration and does not establish an applicable maintenance limit.
+
+Step 7 validates that a selected point belongs to the common overlap of the three run circles. The UI offers an optional computed best-fit point, but it does not establish an approved resultant or enforce the training manual's graphical instruction to select the *center* of the common area. The point can still be selected or overridden manually, and the engineer must review it. The boundary allowance is one SVG viewBox unit (one plotted-radius unit divided by 192), or the greater floating-point allowance (32 machine epsilons or 1e-9 of plot scale). This is only a geometry/pointer tolerance, not a vibration tolerance.
+
+The training-manual three-shot example uses screw positions 120° apart. The app requires recorded positions to be equally spaced by 12 positions on the 36-position convention before calculations proceed. This is a method-consistency check based on unverified training material; confirm actual configuration and applicability against current approved data.
 
 ## Data required before enabling hardware selection
 
